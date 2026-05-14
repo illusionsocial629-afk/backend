@@ -1,21 +1,47 @@
 import nodemailer from "nodemailer";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+
+const upload = multer({
+  dest: "/tmp",
+});
+
+function runMiddleware(req, res, fn) {
+  return new Promise((resolve, reject) => {
+    fn(req, res, (result) => {
+      if (result instanceof Error) return reject(result);
+      return resolve(result);
+    });
+  });
+}
+
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
 
 export default async function handler(req, res) {
-  // ✅ CORS HEADERS (IMPORTANT)
+  // CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-  // ✅ handle preflight request
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
 
   if (req.method !== "POST") {
-    return res.status(405).json({ success: false, error: "Only POST allowed" });
+    return res.status(405).json({
+      success: false,
+      error: "Only POST allowed",
+    });
   }
 
   try {
+    await runMiddleware(req, res, upload.single("file"));
+
     const { name, email, message, selected_filament, use_case } = req.body;
 
     const transporter = nodemailer.createTransport({
@@ -26,8 +52,17 @@ export default async function handler(req, res) {
       },
     });
 
+    const attachments = [];
+
+    if (req.file) {
+      attachments.push({
+        filename: req.file.originalname,
+        path: req.file.path,
+      });
+    }
+
     await transporter.sendMail({
-      from: `Contact <${process.env.EMAIL_USER}>`,
+      from: process.env.EMAIL_USER,
       to: process.env.EMAIL_USER,
       subject: "New Contact Form Submission",
       html: `
@@ -38,10 +73,17 @@ export default async function handler(req, res) {
         <p><b>Material:</b> ${selected_filament || "-"}</p>
         <p><b>Use Case:</b> ${use_case || "-"}</p>
       `,
+      attachments,
     });
 
-    return res.status(200).json({ success: true });
+    return res.status(200).json({
+      success: true,
+    });
+
   } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
   }
 }
